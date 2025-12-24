@@ -20,4 +20,4 @@ This repository documents the design, 3d printing, and YAML code used to build t
 2. 3D printing files as well as my Fusion360 source file.
 3. Build notes with all the little things learned along the way
 
-I hope you take on the challenge to build one of your own.. and make it better
+I hope you take on the challenge to build one of your own... and make it better
