@@ -1,0 +1,146 @@
+# ESPhome Projection Clock, 12-25, BG
+esphome:
+  name: projection-clock
+  friendly_name: Projection Clock
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "" //Insert your api key here
+
+ota:
+  - platform: esphome
+    password: "" //Insert your ota password here
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Projection-Clock"
+    password: "" //Insert your ap password here
+
+captive_portal:
+
+# Backlight control. 1200 Hz below the 2khZ limit for the LD1500SB. 500Hz resulted in filckering
+output:
+  - platform: ledc
+    pin: GPIO4
+    id: dim_pwm
+    frequency: 1200 Hz
+
+number:
+  - platform: template
+    name: "LD1500SB Brightness"
+    min_value: 0
+    max_value: 1
+    step: 0.01
+    set_action:
+      - output.set_level:
+          id: dim_pwm
+          level: !lambda |
+            if (x <= 0.01f) return 0.0f;      // TRUE OFF
+            else if (x < 0.05f) return 0.05f; // Minimum floor
+            else return x;
+# Outdoor temperature sensor and dawn time. Substitute your sensor name for "sensor.temp2_temperature."
+sensor:
+  - platform: homeassistant
+    id: tempout
+    entity_id: sensor.temp2_temperature
+
+text_sensor:
+  - platform: homeassistant
+    id: sensor_sun_next_dawn
+    entity_id: sensor.sun_next_dawn
+
+# Home Assistant time
+time:
+  - platform: homeassistant
+    id: ha_time
+
+# SPI bus for display
+spi:
+  clk_pin: 18
+  mosi_pin: 23
+  id: spi_bus
+
+# Fonts. Download Roboto and Materials and Symbols font and install .ttf in /config/esphome/fonts
+font:
+  - file: "gfonts://Roboto"
+    id: font_big
+    size: 38
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 14
+
+  - file: "fonts/MaterialSymbolsOutlined-VariableFont_FILL,GRAD,opsz,wght.ttf"
+    id: font_icons
+    size: 20
+    glyphs:
+      - "\U0000E81A"   # Sunny
+      - "\U0000E1FF"   # Thermometer
+
+# Display configuration. st7735 is depricated so a day may come when this must change
+display:
+  - platform: st7735
+    id: tft
+    model: "INITR_GREENTAB"
+    cs_pin: 5
+    dc_pin: 17
+    reset_pin: 16
+    device_width: 128
+    device_height: 160
+    col_start: 2
+    row_start: 1
+    rotation: 180
+    invert_colors: false
+    update_interval: 1s
+    lambda: |-
+      // --- TIME (centered, no leading zero) ---
+      char timebuf[6] = {};
+      id(ha_time).now().strftime(timebuf, sizeof(timebuf), "%I:%M");
+
+      const char* timestr = (timebuf[0] == '0') ? timebuf + 1 : timebuf;
+
+      // Center X = 64 on a 128px-wide portrait display
+      it.printf(64, 32, id(font_big), TextAlign::CENTER, "%s", timestr);
+
+      // --- SUNRISE (centered, icon + time) ---
+      auto s = id(sensor_sun_next_dawn);
+      if (s->has_state()) {
+        std::string full = s->state;            // "2025-12-07T13:04:59+00:00"
+        std::string t = full.substr(11, 5);     // HH:MM
+        int hour = std::stoi(t.substr(0,2)) - 6; // UTC → local (example CST)
+        if (hour < 0) hour += 24;
+        t = std::to_string(hour) + ":" + t.substr(3,2);
+
+        // Centered icon + text pair on line 3 at y = 120
+        it.printf(48, 97, id(font_icons), TextAlign::CENTER, "\U0000E81A");   // sunrise icon
+        it.printf(80, 97, id(font_small), TextAlign::CENTER, "%s", t.c_str());
+      } else {
+        // fallback (no icon)
+        it.printf(64, 97, id(font_small), TextAlign::CENTER, "No Sun");
+      }
+
+      // --- TEMPERATURE (centered, icon + value) ---
+      auto t2 = id(tempout);
+      if (t2->has_state()) {
+        char tempbuf[16];
+        snprintf(tempbuf, sizeof(tempbuf), "%.0f°F", t2->state);
+
+        // Centered icon + text pair on line 2 at y = 80
+        it.printf(48, 70, id(font_icons), TextAlign::CENTER, "\U0000E1FF");   // thermometer icon
+        it.printf(80, 70, id(font_small), TextAlign::CENTER, "%s", tempbuf);
+      } else {
+        // fallback (no icon)
+        it.printf(64, 70, id(font_small), TextAlign::CENTER, "No Temp");
+      }
